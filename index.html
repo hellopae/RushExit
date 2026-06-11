@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<!-- saved from url=(0048)file:///Users/agapae/Downloads/rush-exit-3d.html -->
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RUSH EXIT — 3D Parking Puzzle</title>
+<style>
+  :root{
+    --amber:#ffb547; --amber-dim:#b97f2e; --ink:#0d1020; --glass:rgba(13,16,32,.72);
+    --text:#e8e4da; --muted:#8d8a9e; --red:#e8453c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;overflow:hidden;background:#11142a;font-family:"Segoe UI",Helvetica,Arial,sans-serif;color:var(--text);}
+  #c{position:fixed;inset:0;display:block;touch-action:none;}
+
+  /* ---------- HUD ---------- */
+  .hud{position:fixed;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;
+       padding:14px 16px;pointer-events:none;z-index:5;}
+  .hud.top{top:0;}
+  .panel{background:var(--glass);backdrop-filter:blur(8px);border:1px solid rgba(255,181,71,.25);
+         border-radius:10px;padding:10px 14px;pointer-events:auto;}
+  .brand{font-weight:800;letter-spacing:.22em;font-size:15px;color:var(--amber);}
+  .brand small{display:block;letter-spacing:.3em;font-size:9px;color:var(--muted);font-weight:600;margin-top:2px;}
+  .stats{display:flex;gap:18px;text-align:center;}
+  .stat .num{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;}
+  .stat .lab{font-size:9px;letter-spacing:.25em;color:var(--muted);margin-top:4px;font-weight:600;}
+  .stat .num.amber{color:var(--amber);}
+
+  .hud.bottom{bottom:0;align-items:flex-end;}
+  .btnrow{display:flex;gap:8px;pointer-events:auto;}
+  button{background:var(--glass);backdrop-filter:blur(8px);color:var(--text);border:1px solid rgba(255,181,71,.3);
+         border-radius:9px;padding:10px 16px;font-size:12px;font-weight:700;letter-spacing:.12em;cursor:pointer;
+         transition:background .15s,border-color .15s;font-family:inherit;}
+  button:hover{background:rgba(255,181,71,.15);border-color:var(--amber);}
+  button:disabled{opacity:.35;cursor:default;}
+  button.primary{background:var(--amber);color:var(--ink);border-color:var(--amber);}
+  button.primary:hover{background:#ffc56b;}
+
+  .hint{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.18em;
+        color:var(--muted);z-index:4;pointer-events:none;transition:opacity 1s;text-align:center;white-space:nowrap;}
+
+  /* ---------- Win overlay ---------- */
+  .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10;
+           background:rgba(8,10,22,.55);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .4s;}
+  .overlay.show{opacity:1;pointer-events:auto;}
+  .card{background:var(--glass);border:1px solid rgba(255,181,71,.4);border-radius:16px;padding:34px 44px;
+        text-align:center;transform:translateY(14px);transition:transform .4s;}
+  .overlay.show .card{transform:translateY(0);}
+  .card h2{color:var(--amber);letter-spacing:.3em;font-size:22px;font-weight:800;}
+  .stars{font-size:30px;margin:14px 0 6px;letter-spacing:.2em;}
+  .stars .off{opacity:.18;}
+  .card p{color:var(--muted);font-size:13px;margin-bottom:22px;letter-spacing:.05em;}
+  .card .btnrow{justify-content:center;}
+
+  @media (max-width:560px){
+    .hud{padding:10px;}
+    .panel{padding:8px 11px;}
+    .stats{gap:12px;}
+    .stat .num{font-size:18px;}
+    button{padding:9px 12px;font-size:11px;}
+    .card{padding:26px 28px;margin:0 16px;}
+  }
+  @media (prefers-reduced-motion:reduce){ .overlay,.card{transition:none;} }
+</style>
+</head>
+<body>
+<canvas id="c" width="3584" height="1960" style="width: 1792px; height: 980px;"></canvas>
+
+<div class="hud top">
+  <div class="panel brand">RUSH EXIT<small>ROOFTOP DECK · LEVEL <span id="lvlNum">4</span></small></div>
+  <div class="panel stats">
+    <div class="stat"><div class="num" id="moves">0</div><div class="lab">MOVES</div></div>
+    <div class="stat"><div class="num amber" id="par">10</div><div class="lab">PAR</div></div>
+  </div>
+</div>
+
+<div class="hud bottom">
+  <div class="btnrow">
+    <button id="prevBtn">◀ PREV</button>
+    <button id="nextBtn">NEXT ▶</button>
+  </div>
+  <div class="btnrow">
+    <button id="undoBtn">UNDO</button>
+    <button id="resetBtn">RESET</button>
+  </div>
+</div>
+
+<div class="hint" id="hint" style="opacity: 0;">DRAG THE RED CAR TO THE GLOWING EXIT · DRAG EMPTY SPACE TO ORBIT</div>
+
+<div class="overlay" id="overlay">
+  <div class="card">
+    <h2>LEVEL CLEAR</h2>
+    <div class="stars" id="stars">★<span class="off">★★</span></div>
+    <p id="winText">Escaped in 19 moves · par 7</p>
+    <div class="btnrow">
+      <button id="replayBtn">REPLAY</button>
+      <button class="primary" id="advanceBtn">NEXT LEVEL ▶</button>
+    </div>
+  </div>
+</div>
+
+<script src="./assets/three.min.js"></script>
+<script>
+'use strict';
+/* =====================================================================
+   RUSH EXIT — Unblock-Me-style 3D sliding puzzle (Three.js)
+   Board: 6×6. Red car sits on row 2 and must escape through the gap
+   in the right barrier. All levels BFS-verified solvable.
+   ===================================================================== */
+
+const N = 6, EXIT_ROW = 2, CELL = 1;
+const HALF = N * CELL / 2;
+
+/* cars: [x, y, len, 'h'|'v'] — index 0 is always the red car */
+const LEVELS = [
+ {par:2,  cars:[[1,2,2,'h'],[2,4,3,'h'],[0,3,2,'h'],[3,1,2,'v']]},
+ {par:4,  cars:[[0,2,2,'h'],[3,2,2,'v'],[3,1,2,'h'],[4,3,3,'v'],[5,0,2,'v'],[1,4,3,'h'],[2,1,2,'v']]},
+ {par:7,  cars:[[0,2,2,'h'],[0,4,2,'v'],[4,0,2,'h'],[1,0,2,'h'],[2,5,2,'h'],[1,1,3,'h'],[1,3,3,'v'],[3,2,2,'v'],[3,4,3,'h'],[5,1,2,'v'],[0,0,2,'v']]},
+ {par:10, cars:[[1,2,2,'h'],[4,4,2,'h'],[0,4,2,'h'],[5,1,3,'v'],[3,3,2,'v'],[1,5,2,'h'],[0,2,2,'v'],[2,0,3,'h'],[4,2,2,'v'],[0,0,2,'v'],[2,1,2,'h']]},
+ {par:14, cars:[[0,2,2,'h'],[1,1,2,'h'],[2,5,3,'h'],[0,0,2,'v'],[2,2,2,'v'],[3,1,2,'h'],[0,4,3,'h'],[0,5,2,'h'],[3,2,2,'v'],[1,0,3,'h'],[4,2,2,'v']]},
+ {par:17, cars:[[2,2,2,'h'],[2,5,2,'h'],[1,0,2,'h'],[1,2,2,'v'],[3,3,2,'h'],[5,2,2,'v'],[4,0,3,'v'],[2,3,2,'v'],[1,1,2,'h'],[0,2,2,'v'],[5,4,2,'v'],[1,4,2,'v'],[3,4,2,'h'],[0,0,2,'v']]},
+];
+
+const PALETTE = [0x4a7fb5,0x5e8f6d,0x9a7bb0,0x6b6f7d,0x3f8f8f,0xb08a5e,0x7d6b9e,0x557a99,0x8a8f5e,0x996b6b,0x5e7a8a,0x7a9e6b,0x8f7a5e];
+
+/* ---------------- renderer / scene ---------------- */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x1a1430, 18, 46);
+
+/* dusk sky dome (gradient via canvas texture) */
+(function sky(){
+  const cv = document.createElement('canvas'); cv.width = 4; cv.height = 256;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0,0,0,256);
+  grad.addColorStop(0, '#0b0d22');
+  grad.addColorStop(.45,'#2a2150');
+  grad.addColorStop(.75,'#6b3a5e');
+  grad.addColorStop(1, '#c96f4a');
+  g.fillStyle = grad; g.fillRect(0,0,4,256);
+  const tex = new THREE.CanvasTexture(cv);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(60, 24, 16),
+    new THREE.MeshBasicMaterial({map:tex, side:THREE.BackSide, fog:false})
+  );
+  scene.add(dome);
+})();
+
+const camera = new THREE.PerspectiveCamera(46, 1, .1, 200);
+const camTarget = new THREE.Vector3(0.4, 0, 0);
+let azimuth = -0.45, polar = 0.95, camDist = 12.5;
+function applyCamera(){
+  camera.position.set(
+    camTarget.x + camDist * Math.sin(polar) * Math.sin(azimuth),
+    camTarget.y + camDist * Math.cos(polar),
+    camTarget.z + camDist * Math.sin(polar) * Math.cos(azimuth)
+  );
+  camera.lookAt(camTarget);
+}
+
+/* ---------------- lights ---------------- */
+scene.add(new THREE.AmbientLight(0x6a5a8a, .55));
+const sun = new THREE.DirectionalLight(0xffc9a0, .9);
+sun.position.set(-8, 12, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -8; sun.shadow.camera.right = 8;
+sun.shadow.camera.top = 8;   sun.shadow.camera.bottom = -8;
+scene.add(sun);
+const exitGlow = new THREE.PointLight(0xffb547, 1.6, 7);
+exitGlow.position.set(HALF + .6, 1.1, (EXIT_ROW + .5) * CELL - HALF);
+scene.add(exitGlow);
+
+/* ---------------- asphalt board ---------------- */
+function asphaltTexture(){
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#2e3036'; g.fillRect(0,0,512,512);
+  for(let i=0;i<9000;i++){
+    const v = 38 + Math.random()*30;
+    g.fillStyle = `rgba(${v},${v},${v+6},${Math.random()*.5})`;
+    g.fillRect(Math.random()*512, Math.random()*512, 1.6, 1.6);
+  }
+  const s = 512 / N;
+  g.strokeStyle = 'rgba(225,215,190,.5)'; g.lineWidth = 3;
+  g.setLineDash([14, 12]);
+  for(let i=1;i<N;i++){
+    g.beginPath(); g.moveTo(i*s,0); g.lineTo(i*s,512); g.stroke();
+    g.beginPath(); g.moveTo(0,i*s); g.lineTo(512,i*s); g.stroke();
+  }
+  g.setLineDash([]);
+  /* amber guide arrows on the exit row */
+  g.fillStyle = 'rgba(255,181,71,.8)';
+  const rowY = (EXIT_ROW + .5) * s;
+  for(let i=0;i<N;i++){
+    const cx = (i + .55) * s;
+    g.beginPath();
+    g.moveTo(cx-12, rowY-13); g.lineTo(cx+8, rowY); g.lineTo(cx-12, rowY+13);
+    g.lineTo(cx-4, rowY); g.closePath(); g.fill();
+  }
+  return new THREE.CanvasTexture(cv);
+}
+const board = new THREE.Mesh(
+  new THREE.BoxGeometry(N*CELL, .3, N*CELL),
+  new THREE.MeshStandardMaterial({map:asphaltTexture(), roughness:.95})
+);
+board.position.y = -.15;
+board.receiveShadow = true;
+scene.add(board);
+
+/* deck slab below + distant rooftop floor */
+const slab = new THREE.Mesh(
+  new THREE.BoxGeometry(N*CELL + 1.6, .8, N*CELL + 1.6),
+  new THREE.MeshStandardMaterial({color:0x232530, roughness:1})
+);
+slab.position.y = -.7;
+scene.add(slab);
+
+/* ---------------- concrete barriers with EXIT gap ---------------- */
+const barrierMat = new THREE.MeshStandardMaterial({color:0x4a4d58, roughness:.85});
+const stripeMat  = new THREE.MeshStandardMaterial({color:0xb9a23c, roughness:.7});
+function barrier(w, d, x, z){
+  const grp = new THREE.Group();
+  const b = new THREE.Mesh(new THREE.BoxGeometry(w, .55, d), barrierMat);
+  b.position.y = .275; b.castShadow = b.receiveShadow = true;
+  const s = new THREE.Mesh(new THREE.BoxGeometry(w + .02, .12, d + .02), stripeMat);
+  s.position.y = .42;
+  grp.add(b, s); grp.position.set(x, 0, z);
+  scene.add(grp);
+}
+const T = .45; /* barrier thickness */
+barrier(N*CELL + 2*T, T, 0, -HALF - T/2);                     /* top    */
+barrier(N*CELL + 2*T, T, 0,  HALF + T/2);                     /* bottom */
+barrier(T, N*CELL, -HALF - T/2, 0);                           /* left   */
+const gapLo = EXIT_ROW * CELL - HALF, gapHi = gapLo + CELL;   /* right, split around exit */
+barrier(T, gapLo + HALF,        HALF + T/2, (gapLo - HALF)/2);
+barrier(T, HALF - gapHi,        HALF + T/2, (gapHi + HALF)/2);
+
+/* ---------------- glowing EXIT gate (signature element) ---------------- */
+(function exitGate(){
+  const zc = (EXIT_ROW + .5)*CELL - HALF;
+  const postGeo = new THREE.BoxGeometry(.14, 1.5, .14);
+  const postMat = new THREE.MeshStandardMaterial({color:0x33363f, roughness:.6});
+  [gapLo + .02, gapHi - .02].forEach(z=>{
+    const p = new THREE.Mesh(postGeo, postMat);
+    p.position.set(HALF + .25, .75, z); p.castShadow = true;
+    scene.add(p);
+  });
+  /* neon sign */
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 96;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#15131f'; g.fillRect(0,0,256,96);
+  g.font = '800 56px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = '#ffb547'; g.shadowBlur = 26;
+  g.fillStyle = '#ffd28a'; g.fillText('EXIT', 128, 52);
+  const sign = new THREE.Mesh(
+    new THREE.BoxGeometry(.1, .55, 1.35),
+    [
+      new THREE.MeshBasicMaterial({color:0x15131f}),
+      new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(cv)}),
+      new THREE.MeshBasicMaterial({color:0x15131f}),
+      new THREE.MeshBasicMaterial({color:0x15131f}),
+      new THREE.MeshBasicMaterial({color:0x15131f}),
+      new THREE.MeshBasicMaterial({color:0x15131f}),
+    ]
+  );
+  sign.position.set(HALF + .25, 1.55, zc);
+  scene.add(sign);
+  /* glow strip on the ground through the gap */
+  const strip = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.3, CELL * .92),
+    new THREE.MeshBasicMaterial({color:0xffb547, transparent:true, opacity:.22})
+  );
+  strip.rotation.x = -Math.PI/2;
+  strip.position.set(HALF + .65, .005, zc);
+  scene.add(strip);
+})();
+
+/* ambient props: a couple of rooftop lamp posts + AC units */
+(function props(){
+  const lampMat = new THREE.MeshStandardMaterial({color:0x2b2d36, roughness:.7});
+  [[-HALF-1.6, -HALF-1.2],[ -HALF-1.4, HALF+1.3]].forEach(([x,z])=>{
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(.05,.07,2.6,8), lampMat);
+    pole.position.set(x, 1.3, z); scene.add(pole);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(.13,10,8),
+      new THREE.MeshBasicMaterial({color:0xffe2b0}));
+    head.position.set(x, 2.6, z); scene.add(head);
+    const pl = new THREE.PointLight(0xffd9a0, .55, 8);
+    pl.position.set(x, 2.5, z); scene.add(pl);
+  });
+  const acMat = new THREE.MeshStandardMaterial({color:0x5a5e6a, roughness:.9});
+  const ac = new THREE.Mesh(new THREE.BoxGeometry(1.4,.7,1.0), acMat);
+  ac.position.set(HALF+1.9, .05, -HALF-1.5); ac.castShadow = true;
+  scene.add(ac);
+})();
+
+/* ---------------- car factory ---------------- */
+function makeCar(len, horiz, color, isPlayer){
+  const grp = new THREE.Group();
+  const L = len * CELL - .22, W = CELL - .3, H = .42;
+  const bodyMat = new THREE.MeshStandardMaterial({color, roughness:.35, metalness:.35});
+  const darkMat = new THREE.MeshStandardMaterial({color:0x14151c, roughness:.5});
+  const glassMat = new THREE.MeshStandardMaterial({color:0x9fd0e8, roughness:.1, metalness:.6});
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(L, H, W), bodyMat);
+  body.position.y = .32; body.castShadow = true; grp.add(body);
+
+  const cabinL = len === 2 ? L*.5 : L*.42;
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(cabinL, .3, W*.82), glassMat);
+  cabin.position.set(len===2 ? -.06 : -.18, .66, 0); cabin.castShadow = true; grp.add(cabin);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(cabinL*.92, .07, W*.86), bodyMat);
+  roof.position.set(cabin.position.x, .84, 0); grp.add(roof);
+
+  const wGeo = new THREE.CylinderGeometry(.16,.16,.12,14);
+  const axles = len === 2 ? [-L/2+.32, L/2-.32] : [-L/2+.32, 0, L/2-.32];
+  axles.forEach(ax=>{
+    [-W/2+.02, W/2-.02].forEach(wz=>{
+      const w = new THREE.Mesh(wGeo, darkMat);
+      w.rotation.x = Math.PI/2;
+      w.position.set(ax, .16, wz);
+      w.castShadow = true; grp.add(w);
+    });
+  });
+
+  /* lights: head = +x end, tail = -x end (red car drives +x to exit) */
+  const head = new THREE.Mesh(new THREE.BoxGeometry(.05,.09,.14),
+    new THREE.MeshBasicMaterial({color: isPlayer ? 0xfff3c4 : 0xd8d2b8}));
+  head.position.set(L/2+.01, .36, W/4); grp.add(head);
+  const head2 = head.clone(); head2.position.z = -W/4; grp.add(head2);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(.05,.08,.13),
+    new THREE.MeshBasicMaterial({color:0xb3261e}));
+  tail.position.set(-L/2-.01, .36, W/4); grp.add(tail);
+  const tail2 = tail.clone(); tail2.position.z = -W/4; grp.add(tail2);
+
+  if(isPlayer){
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(L+.02, .05, .14),
+      new THREE.MeshStandardMaterial({color:0xfff1d0, roughness:.4}));
+    stripe.position.y = .54; grp.add(stripe);
+  }
+  if(!horiz) grp.rotation.y = -Math.PI/2; /* vertical cars face +z (down the board) */
+  grp.traverse(o=>{ o.userData.car = grp; });
+  return grp;
+}
+
+/* ---------------- game state ---------------- */
+const cellToWorld = (cx, len)=> (cx + len/2) * CELL - HALF;   /* center along axis */
+const laneToWorld = (cy)=> (cy + .5) * CELL - HALF;
+
+let levelIdx = 0, cars = [], moves = 0, history = [], winning = false;
+let selected = null;
+
+const ui = {
+  lvl: document.getElementById('lvlNum'), moves: document.getElementById('moves'),
+  par: document.getElementById('par'), overlay: document.getElementById('overlay'),
+  stars: document.getElementById('stars'), winText: document.getElementById('winText'),
+  hint: document.getElementById('hint'),
+};
+
+function clearCars(){ cars.forEach(c=>scene.remove(c.mesh)); cars = []; }
+
+function loadLevel(i){
+  levelIdx = (i + LEVELS.length) % LEVELS.length;
+  clearCars();
+  winning = false; moves = 0; history = [];
+  ui.overlay.classList.remove('show');
+  const def = LEVELS[levelIdx];
+  def.cars.forEach((c, idx)=>{
+    const [x, y, len, o] = c;
+    const horiz = o === 'h';
+    const isPlayer = idx === 0;
+    const color = isPlayer ? 0xe8453c : PALETTE[idx % PALETTE.length];
+    const mesh = makeCar(len, horiz, color, isPlayer);
+    const car = {mesh, len, horiz, isPlayer, lane: horiz ? y : x, p: horiz ? x : y};
+    placeCar(car);
+    scene.add(mesh);
+    cars.push(car);
+  });
+  ui.lvl.textContent = levelIdx + 1;
+  ui.par.textContent = def.par;
+  ui.moves.textContent = '0';
+  document.getElementById('prevBtn').disabled = levelIdx === 0;
+}
+
+function placeCar(car){
+  const along = cellToWorld(car.p, car.len);
+  const cross = laneToWorld(car.lane);
+  car.mesh.position.set(car.horiz ? along : cross, 0, car.horiz ? cross : along);
+}
+
+/* occupancy grid from current snapped positions, excluding one car */
+function occupancy(except){
+  const g = Array.from({length:N}, ()=>Array(N).fill(false));
+  cars.forEach(c=>{
+    if(c === except) return;
+    for(let k=0;k<c.len;k++){
+      const x = c.horiz ? c.p + k : c.lane;
+      const y = c.horiz ? c.lane : c.p + k;
+      g[y][x] = true;
+    }
+  });
+  return g;
+}
+
+/* sliding range [min,max] for a car given others fixed */
+function slideRange(car){
+  const g = occupancy(car);
+  let lo = car.p, hi = car.p;
+  while(lo > 0){
+    const cell = lo - 1;
+    const x = car.horiz ? cell : car.lane, y = car.horiz ? car.lane : cell;
+    if(g[y][x]) break; lo--;
+  }
+  while(hi + car.len < N){
+    const cell = hi + car.len;
+    const x = car.horiz ? cell : car.lane, y = car.horiz ? car.lane : cell;
+    if(g[y][x]) break; hi++;
+  }
+  return [lo, hi];
+}
+
+/* ---------------- input: drag cars / orbit camera ---------------- */
+const ray = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0,1,0), 0);
+let drag = null, orbit = null;
+
+function pointerNDC(e){
+  const r = canvas.getBoundingClientRect();
+  ndc.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+  ndc.y = -((e.clientY - r.top) / r.height) * 2 + 1;
+}
+
+canvas.addEventListener('pointerdown', e=>{
+  if(winning) return;
+  canvas.setPointerCapture(e.pointerId);
+  pointerNDC(e);
+  ray.setFromCamera(ndc, camera);
+  const meshes = [];
+  cars.forEach(c=>c.mesh.traverse(o=>{ if(o.isMesh) meshes.push(o); }));
+  const hit = ray.intersectObjects(meshes, false)[0];
+  if(hit){
+    const car = cars.find(c=>c.mesh === hit.object.userData.car);
+    if(!car) return;
+    const pt = new THREE.Vector3();
+    ray.ray.intersectPlane(groundPlane, pt);
+    const [lo, hi] = slideRange(car);
+    drag = {
+      car, lo, hi, startP: car.p,
+      grabOffset: (car.horiz ? pt.x : pt.z) - cellToWorld(car.p, car.len),
+    };
+    selected = car;
+    ui.hint.style.opacity = 0;
+  } else {
+    orbit = {x:e.clientX, y:e.clientY, az:azimuth, po:polar};
+  }
+});
+
+canvas.addEventListener('pointermove', e=>{
+  if(drag){
+    pointerNDC(e);
+    ray.setFromCamera(ndc, camera);
+    const pt = new THREE.Vector3();
+    if(!ray.ray.intersectPlane(groundPlane, pt)) return;
+    const target = (drag.car.horiz ? pt.x : pt.z) - drag.grabOffset;
+    const minW = cellToWorld(drag.lo, drag.car.len);
+    let maxW = cellToWorld(drag.hi, drag.car.len);
+    /* allow the red car to be pulled past the edge when the exit is open */
+    const canExit = drag.car.isPlayer && drag.hi + drag.car.len === N;
+    if(canExit) maxW += .9;
+    const clamped = Math.max(minW, Math.min(maxW, target));
+    const pos = drag.car.mesh.position;
+    if(drag.car.horiz) pos.x = clamped; else pos.z = clamped;
+    if(canExit && clamped > cellToWorld(drag.hi, drag.car.len) + .55){
+      commitDrag(drag.hi);
+      startWin();
+    }
+  } else if(orbit){
+    const dx = (e.clientX - orbit.x) * .005;
+    const dy = (e.clientY - orbit.y) * .004;
+    azimuth = orbit.az - dx;
+    polar = Math.max(.35, Math.min(1.25, orbit.po - dy));
+  }
+});
+
+function commitDrag(snapP){
+  const d = drag; drag = null;
+  if(!d) return;
+  if(snapP !== d.startP){
+    history.push({car:d.car, from:d.startP});
+    d.car.p = snapP;
+    moves++; ui.moves.textContent = moves;
+  } else {
+    d.car.p = snapP;
+  }
+  placeCar(d.car);
+}
+
+canvas.addEventListener('pointerup', e=>{
+  if(drag && !winning){
+    const along = drag.car.horiz ? drag.car.mesh.position.x : drag.car.mesh.position.z;
+    let snap = Math.round((along + HALF) / CELL - drag.car.len/2);
+    snap = Math.max(drag.lo, Math.min(drag.hi, snap));
+    commitDrag(snap);
+    if(drag === null && cars[0].p + cars[0].len === N && !winning) startWin();
+  }
+  orbit = null;
+});
+canvas.addEventListener('pointercancel', ()=>{ if(drag) commitDrag(drag.startP); orbit = null; });
+canvas.addEventListener('wheel', e=>{
+  camDist = Math.max(7, Math.min(20, camDist + e.deltaY * .01));
+}, {passive:true});
+
+/* ---------------- win sequence ---------------- */
+let winAnim = null;
+function startWin(){
+  winning = true; drag = null;
+  const red = cars[0];
+  winAnim = {t:0, car:red};
+  setTimeout(()=>{
+    const par = LEVELS[levelIdx].par;
+    const s = moves <= par ? 3 : moves <= par + 3 ? 2 : 1;
+    ui.stars.innerHTML = '★'.repeat(s) + `<span class="off">${'★'.repeat(3-s)}</span>`;
+    ui.winText.textContent = `Escaped in ${moves} move${moves===1?'':'s'} · par ${par}`;
+    document.getElementById('advanceBtn').textContent =
+      levelIdx === LEVELS.length - 1 ? 'PLAY AGAIN ↺' : 'NEXT LEVEL ▶';
+    ui.overlay.classList.add('show');
+  }, 1300);
+}
+
+/* ---------------- buttons ---------------- */
+document.getElementById('resetBtn').onclick = ()=> loadLevel(levelIdx);
+document.getElementById('undoBtn').onclick = ()=>{
+  if(winning || !history.length) return;
+  const last = history.pop();
+  last.car.p = last.from;
+  placeCar(last.car);
+  moves = Math.max(0, moves - 1); ui.moves.textContent = moves;
+};
+document.getElementById('prevBtn').onclick = ()=> loadLevel(levelIdx - 1);
+document.getElementById('nextBtn').onclick = ()=> loadLevel(levelIdx + 1);
+document.getElementById('replayBtn').onclick = ()=> loadLevel(levelIdx);
+document.getElementById('advanceBtn').onclick = ()=> loadLevel(levelIdx + 1);
+
+/* ---------------- resize & loop ---------------- */
+function resize(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resize);
+resize();
+
+const clock = new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt = Math.min(clock.getDelta(), .05);
+  const t = clock.elapsedTime;
+
+  exitGlow.intensity = 1.5 + Math.sin(t * 2.4) * .35;
+
+  /* gentle pulse on the red car when idle */
+  const red = cars[0];
+  if(red && !winning){
+    const pulse = 1 + Math.sin(t * 3) * .015;
+    red.mesh.scale.set(pulse, pulse, pulse);
+  }
+
+  /* ease non-dragged cars to their snapped spots */
+  cars.forEach(c=>{
+    if(drag && drag.car === c) return;
+    if(winning && c.isPlayer) return;
+    const tx = c.horiz ? cellToWorld(c.p, c.len) : laneToWorld(c.lane);
+    const tz = c.horiz ? laneToWorld(c.lane) : cellToWorld(c.p, c.len);
+    c.mesh.position.x += (tx - c.mesh.position.x) * Math.min(1, dt * 14);
+    c.mesh.position.z += (tz - c.mesh.position.z) * Math.min(1, dt * 14);
+  });
+
+  /* drive-out animation */
+  if(winAnim){
+    winAnim.t += dt;
+    const car = winAnim.car;
+    const speed = 1.5 + winAnim.t * 4;
+    car.mesh.position.x += speed * dt;
+    car.mesh.scale.setScalar(1);
+    if(winAnim.t > 2.2) winAnim = null;
+  }
+
+  applyCamera();
+  renderer.render(scene, camera);
+}
+loadLevel(0);
+loop();
+
+setTimeout(()=>{ ui.hint.style.opacity = 0; }, 9000);
+</script>
+
+
+</body></html>
